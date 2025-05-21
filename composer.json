@@ -1,0 +1,20 @@
+{
+    "name": "sudtech/hello-sud-php",
+    "require": {
+        "php": "^7.4 || ^8.0",
+        "sudtechnology/sud-gip-auth-php": "1.0.0.1",
+        "vlucas/phpdotenv": "^5.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "SudGipAuth\\": "src/"
+        }
+    },
+    "config": {
+        "platform": {
+            "php": "7.4"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
