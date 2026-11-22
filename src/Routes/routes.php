@@ -2,7 +2,11 @@
 use SudGipAuth\Controllers\AuthController;
 
 return function($router, $app) {
-    // 注册路由
+    // Register the client and callback endpoints.
+    $router->get('/health', function () {
+        \SudGipAuth\Http\Response::success(['status' => 'ok']);
+    });
+
     $router->get('/api/getCode', function($queryParams, $requestBody) use ($app) {
         $controller = new AuthController($app->getAuthService());
         $controller->getCode($queryParams);

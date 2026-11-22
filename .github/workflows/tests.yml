@@ -1,0 +1,36 @@
+name: Build and HTTP tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        verify: ['false', 'true']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.0'
+          tools: composer:v2
+      - run: composer install --no-interaction --prefer-dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Test callback and SDK flows
+        env:
+          VERIFY_CALLBACK_SIGNATURE: ${{ matrix.verify }}
+        run: |
+          export APP_ID=ci-test-app
+          export APP_SECRET="$(openssl rand -hex 32)"
+          export ASPNETCORE_URLS=http://127.0.0.1:8000
+          php -S 127.0.0.1:8000 -t public public/index.php > /tmp/sud-demo.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/health >/dev/null
+          python3 tests/http_smoke.py http://127.0.0.1:8000

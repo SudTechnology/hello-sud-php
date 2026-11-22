@@ -1,16 +1,13 @@
 <?php
 namespace SudGipAuth\Exceptions;
 
+use SudGipAuth\Http\Response;
+
 class Handler
 {
-    public static function handleException($e)
+    public static function handleException($exception): void
     {
-        http_response_code(500);
-        echo json_encode([
-            "ret_code" => 1,
-            "ret_msg" => "Internal Server Error",
-            "error" => $e->getMessage(),
-            "trace" => $e->getTraceAsString()
-        ]);
+        // Never return internal exception details to the caller.
+        Response::error(500, 'Internal Server Error');
     }
-}    
+}

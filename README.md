@@ -20,7 +20,7 @@ A lightweight PHP HTTP server demo for SudGIP authentication services. Use this 
    ```bash
    composer install
     ```
-3.  Edit the .env file and set your APP_ID and APP_SECRET:
+3.  Copy `.env.example` to `.env`, then edit the .env file and set your APP_ID and APP_SECRET:
     ```bash
     APP_ID=your_actual_app_id
     APP_SECRET=your_actual_app_secret
@@ -57,13 +57,13 @@ docker run --rm --name hello-sud-test \
 ```
 
 Keep this terminal running. Press Ctrl+C to stop the container. The bind mount
-uses your current local `.env` instead of the copy embedded in the image. After
+uses your current local `.env` as runtime configuration. After
 editing `.env`, restart with the same command. Code or dependency changes require
 a new build and a new container.
 
-The current Dockerfile copies the project, including `.env`, into the image.
-Keep this image local if it contains credentials; do not publish it. The built-in
-PHP server is intended for local development only.
+`.dockerignore` excludes `.env` from the image. Supply credentials through the read-only mount
+above or Docker environment variables. Process environment variables take precedence over `.env`.
+The built-in PHP server is intended for local development only.
 
 If pulling the base image times out, check Docker Desktop network/proxy settings
 and retry `docker pull php:8.0-cli-alpine` before building again.
@@ -71,7 +71,7 @@ and retry `docker pull php:8.0-cli-alpine` before building again.
 ### Development Environment
 Start the PHP built-in server:
 ```bash
-  php -S localhost:8000 -t public
+  php -S localhost:8000 -t public public/index.php
 ```
 
 ## Implementing the Demo Server
@@ -91,7 +91,7 @@ require 'vendor/autoload.php';
 
 use Sud\Gip\Api\SudGIPAuth;
 
-Dotenv\Dotenv::createImmutable(__DIR__)->load();
+Dotenv\Dotenv::createImmutable(__DIR__)->safeLoad();
 $auth = new SudGIPAuth($_ENV['APP_ID'], $_ENV['APP_SECRET']);
 ```
 
@@ -156,7 +156,7 @@ It does not revoke the old token. Expired tokens fail verification.
 
 ### 5. Wrap SDK results in HTTP responses
 
-The controller's `sendSuccessResponse` and `sendErrorResponse` methods implement
+The controller's helpers delegate to `src/Http/Response.php` to implement
 the demo's response envelope. For example, a successful handler returns:
 
 ```php
@@ -171,6 +171,42 @@ echo json_encode([
 See `src/Controllers/AuthController.php` for complete handlers and
 `src/Routes/routes.php` for route registration. The snippets above focus on SDK
 calls; they are not standalone HTTP endpoints.
+
+## Optional Callback Signature Verification
+
+> **IMPORTANT — Verify the original request body BEFORE deserialization or conversion.**
+> Use the exact bytes received from the request input stream. Never parse JSON, bind a DTO,
+> serialize an object back to JSON, trim whitespace, reorder fields, normalize line endings,
+> or decode/re-encode the body before verification. Equivalent JSON values can have different
+> signed bytes. This check is intended to detect changes to the received body.
+
+Set `VERIFY_CALLBACK_SIGNATURE=true` to enable verification. The default is `false`.
+When enabled, all `/api/**` callbacks, including `getSSToken` and `updateSSToken`, are checked
+before routing or JSON parsing. `/api/getCode` and `/health` are excluded. Production applications
+must authenticate callers of `getCode` through their own user authentication system.
+
+The required headers are `Sud-AppId`, `Sud-Timestamp`, `Sud-Nonce`, and `Sud-Signature`.
+The application ID must match `APP_ID`. Calculate lowercase hexadecimal HMAC-SHA1 with
+`APP_SECRET` as the UTF-8 key over:
+
+```text
+app_id\n
+timestamp\n
+nonce\n
+original_request_body\n
+```
+
+**Include the final newline**, even for an empty body. Append that protocol newline without
+removing or modifying any newline already in the body. Missing or invalid signatures return
+HTTP 403 with `ret_code: 1`, `sdk_error_code: 0`, and `data: {}`.
+
+Processing order: **capture original bytes → verify signature → parse the unchanged bytes →
+validate inputs → call the SDK**. Callback verification does not replace Code/SSToken verification.
+For example, `{"code":"abc"}` and `{ "code": "abc" }` must produce different signatures.
+
+The documented recipe does not sign the URL, method, or query parameters. This demo does not
+implement a timestamp freshness window or nonce replay store. Local tests are not a substitute
+for integration testing with issued credentials and the remote service.
 
 ## API Reference
 
@@ -211,8 +247,8 @@ calls; they are not standalone HTTP endpoints.
     "expire_date": 1630417861359,
     "user_info": {
       "uid": "xxxxxxx",
-      "nick_name": "萌萌",
-      "avatar_url": "https://icon.png?128*128",
+      "nick_name": "Demo User",
+      "avatar_url": "https://example.com/avatar.png",
       "gender": "female",
       "is_ai": 0,
       "ai_level": 0
@@ -253,58 +289,46 @@ parameters or failed token verification. For example, an invalid Code produces:
   "ret_code": 1,
   "ret_msg": "",
   "sdk_error_code": 1002,
-  "data": []
+  "data": {}
 }
 ```
 
 `ret_code` is the server's result (0 for success, 1 for failure).
 `sdk_error_code` carries SDK verification failures, including 1002 for invalid
 tokens and 1005 for expired tokens. Successful data is an object; the controller
-uses an empty array for failure data. Other unexpected exceptions are handled
-at the application entry point when they propagate there.
+uses an empty object for failure data. Unexpected exceptions return a generic HTTP 500 envelope
+without exception messages or stack traces. Missing paths return 404 and wrong methods return 405.
+Malformed JSON, non-object bodies, wrong field types, and non-JSON POST requests return 400.
+Unknown JSON fields are accepted for forward compatibility. `/health` returns a success envelope.
 
 ## Testing
 
-With the Docker server above running, execute the following in a second terminal.
-It uses PHP inside the container, so no local PHP, Composer, or jq is required.
-Tokens are passed automatically between requests and are not printed.
+The complete HTTP test suite uses Python 3's standard library and passes tokens automatically.
+Start the server, then run in another terminal:
 
 ```bash
-docker exec -i hello-sud-test php <<'PHP'
-<?php
-function request($path, $body = null) {
-    $options = ['http' => ['method' => $body === null ? 'GET' : 'POST',
-        'ignore_errors' => true, 'timeout' => 10]];
-    if ($body !== null) {
-        $options['http']['header'] = "Content-Type: application/json";
-        $options['http']['content'] = json_encode($body);
-    }
-    $raw = file_get_contents('http://127.0.0.1:8000' . $path, false, stream_context_create($options));
-    if ($raw === false) { throw new RuntimeException('HTTP request failed: ' . $path); }
-    return json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-}
-function check($condition, $name) {
-    if (!$condition) { throw new RuntimeException('FAIL: ' . $name); }
-    echo 'PASS: ', $name, PHP_EOL;
-}
-$code = request('/api/getCode?uid=test-user-001');
-check(($code['ret_code'] ?? null) === 0 && !empty($code['data']['code']), 'Generate Code');
-$token = request('/api/getSSToken', ['code' => $code['data']['code']]);
-check(($token['ret_code'] ?? null) === 0 && !empty($token['data']['ss_token'])
-    && ($token['data']['user_info']['uid'] ?? null) === 'test-user-001', 'Exchange Code and read UID');
-sleep(1);
-$refreshed = request('/api/updateSSToken', ['ss_token' => $token['data']['ss_token']]);
-check(($refreshed['ret_code'] ?? null) === 0 && !empty($refreshed['data']['ss_token'])
-    && ($refreshed['data']['expire_date'] ?? 0) > ($token['data']['expire_date'] ?? 0), 'Refresh SSToken');
-$invalid = request('/api/getSSToken', ['code' => 'invalid-token']);
-check(($invalid['ret_code'] ?? null) === 1 && ($invalid['sdk_error_code'] ?? null) === 1002,
-    'Reject invalid Code');
-PHP
+export VERIFY_CALLBACK_SIGNATURE=false
+python3 tests/http_smoke.py http://127.0.0.1:8000
 ```
 
-Expected output: four `PASS` lines and exit status 0. This verifies local token
-creation, verification, UID retrieval, refresh, and malformed-token rejection.
-It does not replace integration testing with Sud services using issued credentials.
+To verify signed callbacks, restart the server with `VERIFY_CALLBACK_SIGNATURE=true` and run:
+
+```bash
+export VERIFY_CALLBACK_SIGNATURE=true
+# Set APP_ID and APP_SECRET to exactly the same values as the running server.
+python3 tests/http_smoke.py http://127.0.0.1:8000
+```
+
+The test process reads credentials from environment variables, not interactive input or `.env`.
+Changing test-terminal variables does not change an already running server. If port 8000 is used
+by another demo, choose a different port and pass that URL to the script.
+
+Both modes exercise Code generation, exchange, mock profiles, refresh, malformed tokens,
+missing and wrong-type inputs, malformed JSON, unknown fields, and route/method errors.
+Signed mode also checks missing headers, wrong app ID or key, altered signatures, and changes
+to spaces and CRLF line endings. The same altered bytes succeed when correctly re-signed.
+Tests print PASS messages and exit nonzero on failure; secrets and tokens are not printed.
+GitHub Actions runs both modes using temporary local test credentials.
 
 ## Project Structure
 ```text
@@ -321,7 +345,9 @@ hello-sud-php/
 │   │   └── Handler.php
 │   └── App.php             # Application bootstrap
 ├── vendor/                 # Composer dependencies
-├── .env                    # Environment configuration
+├── .env.example            # Runtime configuration template
+├── tests/http_smoke.py      # Signed and unsigned HTTP checks
+├── .dockerignore           # Keeps credentials out of images
 ├── composer.json           # Composer configuration
 └── README.md               # Project documentation
 ```
