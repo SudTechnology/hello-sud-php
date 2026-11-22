@@ -1,25 +1,30 @@
 <?php
+
+declare(strict_types=1);
+
 namespace SudGipAuth\Http;
 
-/** Optional HTTP callback authentication, independent from SDK token verification. */
-class CallbackSignature
+use Sud\Gip\Api\RequestSigner;
+
+/** HTTP header adapter; signature computation and comparison belong to the SDK. */
+final class CallbackSignature
 {
-    public static function verify(array $headers, string $originalBody, string $appId, string $secret): bool
+    public static function verify(array $headers, string $originalBody, RequestSigner $signer): bool
     {
-        $id = $headers['HTTP_SUD_APPID'] ?? '';
-        $timestamp = $headers['HTTP_SUD_TIMESTAMP'] ?? '';
-        $nonce = $headers['HTTP_SUD_NONCE'] ?? '';
-        $signature = $headers['HTTP_SUD_SIGNATURE'] ?? '';
-        if ($id !== $appId || trim($timestamp) === '' || trim($nonce) === ''
-            || !preg_match('/\A[0-9a-f]{40}\z/', $signature)) {
-            return false;
+        $values = [];
+        foreach (['HTTP_SUD_APPID', 'HTTP_SUD_TIMESTAMP', 'HTTP_SUD_NONCE', 'HTTP_SUD_SIGNATURE'] as $name) {
+            $value = $headers[$name] ?? '';
+            // PHP servers may combine duplicate headers with commas. Reject such
+            // ambiguous metadata rather than selecting an arbitrary header value.
+            if (!is_string($value) || trim($value) === '' || strpos($value, ',') !== false) {
+                return false;
+            }
+            $values[] = $value;
         }
 
-        // SECURITY: $originalBody must be the exact bytes from php://input. Never json_decode,
-        // json_encode, trim, reorder fields, convert encodings, or normalize line endings first.
-        // The purpose is to detect body tampering, including changes to whitespace. PHP strings
-        // preserve bytes. Append the protocol newline without changing any existing body bytes.
-        $content = $id . "\n" . $timestamp . "\n" . $nonce . "\n" . $originalBody . "\n";
-        return hash_equals(hash_hmac('sha1', $content, $secret), $signature);
+        // SECURITY: pass the ORIGINAL php://input bytes unchanged to the SDK.
+        // Never json_decode/json_encode, trim, normalize line endings, convert
+        // encodings, or decompress first. Only parse after successful verification.
+        return $signer->verifySignature($values[0], $values[1], $values[2], $originalBody, $values[3]);
     }
 }

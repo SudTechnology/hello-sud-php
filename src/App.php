@@ -2,6 +2,7 @@
 namespace SudGipAuth;
 
 use Sud\Gip\Api\SudGIPAuth;
+use Sud\Gip\Api\RequestSigner;
 use SudGipAuth\Routes\Router;
 use SudGipAuth\Http\CallbackSignature;
 use SudGipAuth\Http\Response;
@@ -9,6 +10,7 @@ use SudGipAuth\Http\Response;
 class App
 {
     private $auth;
+    private RequestSigner $requestSigner;
     private $router;
     private $appId;
     private $secret;
@@ -25,6 +27,7 @@ class App
         }
         $this->verifyCallbacks = $flag;
         $this->auth = new SudGIPAuth($this->appId, $this->secret);
+        $this->requestSigner = new RequestSigner($this->appId, $this->secret);
         $this->router = new Router();
         $routes = require __DIR__ . '/Routes/routes.php';
         $routes($this->router, $this);
@@ -47,7 +50,7 @@ class App
         }
         $protected = $path === '/api' || str_starts_with($path, '/api/');
         if ($this->verifyCallbacks && $protected && $path !== '/api/getCode'
-            && !CallbackSignature::verify($_SERVER, $originalBody, $this->appId, $this->secret)) {
+            && !CallbackSignature::verify($_SERVER, $originalBody, $this->requestSigner)) {
             Response::error(403, 'Invalid callback signature');
             return;
         }

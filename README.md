@@ -6,7 +6,7 @@ A lightweight PHP HTTP server demo for SudGIP authentication services. Use this 
 
 - PHP 8.0+ (PHP 7.4 is no longer supported)
 - Composer (https://getcomposer.org/)
-- SudGIP Auth PHP SDK 2.0.0 (automatically installed via Composer; uses firebase/php-jwt ^7.0)
+- SudGIP Auth PHP SDK 2.1.0 (automatically installed via Composer; uses firebase/php-jwt ^7.0)
 - Alternatively, use Docker with its engine running; local PHP and Composer are not required.
 
 ## Installation
@@ -27,7 +27,7 @@ A lightweight PHP HTTP server demo for SudGIP authentication services. Use this 
     ```
     
 The HS256 `APP_SECRET` must contain at least **32 bytes**. The example value
-`your_actual_app_secret` is a placeholder and cannot be used to run SDK 2.0.0.
+`your_actual_app_secret` is a placeholder and cannot be used to run SDK 2.1.0.
 Keep an existing Sud-issued secret unchanged if it meets the requirement. If it
 is shorter, coordinate rotation with the credential issuer; do not pad or hash it
 locally. Both signing and verifying services must use the same key.
@@ -47,7 +47,7 @@ docker build -t hello-sud-php:test .
 docker run --rm hello-sud-php:test composer show sudtechnology/sud-gip-auth-php
 ```
 
-Confirm that the installed version is `v2.0.0`, then start the server:
+Confirm that the installed version is `v2.1.0`, then start the server:
 
 ```bash
 docker run --rm --name hello-sud-test \
@@ -77,7 +77,8 @@ Start the PHP built-in server:
 ## Implementing the Demo Server
 
 The server receives HTTP requests, calls the SDK, and wraps its results in JSON.
-The SDK handles token signing, verification, and UID extraction. Routing, request
+The SDK handles token signing, verification, UID extraction, and callback signature
+computation/comparison through `RequestSigner`. Routing, request
 validation, HTTP status codes, user profiles, and the `ret_code` response envelope
 belong to your application.
 
@@ -192,6 +193,10 @@ Set `VERIFY_CALLBACK_SIGNATURE=true` to enable verification. The default is `fal
 When enabled, all `/api/**` callbacks, including `getSSToken` and `updateSSToken`, are checked
 before routing or JSON parsing. `/api/getCode` and `/health` are excluded. Production applications
 must authenticate callers of `getCode` through their own user authentication system.
+
+The demo delegates verification to `Sud\Gip\Api\RequestSigner`. The HTTP adapter
+extracts headers, rejects ambiguous metadata, and passes the original body unchanged;
+it does not implement its own HMAC algorithm.
 
 The required headers are `Sud-AppId`, `Sud-Timestamp`, `Sud-Nonce`, and `Sud-Signature`.
 The application ID must match `APP_ID`. Calculate lowercase hexadecimal HMAC-SHA1 with

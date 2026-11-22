@@ -2,7 +2,7 @@
     "name": "sudtech/hello-sud-php",
     "require": {
         "php": "^8.0",
-        "sudtechnology/sud-gip-auth-php": "2.0.0",
+        "sudtechnology/sud-gip-auth-php": "2.1.0",
         "vlucas/phpdotenv": "^5.5"
     },
     "autoload": {

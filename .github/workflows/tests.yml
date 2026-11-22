@@ -24,7 +24,6 @@ jobs:
         run: |
           export APP_ID=ci-test-app
           export APP_SECRET="$(openssl rand -hex 32)"
-          export ASPNETCORE_URLS=http://127.0.0.1:8000
           php -S 127.0.0.1:8000 -t public public/index.php > /tmp/sud-demo.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
